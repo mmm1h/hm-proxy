@@ -1,0 +1,31 @@
+name: Sync upstream gh-proxy
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Fetch upstream index.js
+        run: |
+          mkdir -p upstream
+          curl -fsSL https://raw.githubusercontent.com/hunshcn/gh-proxy/master/index.js -o upstream/index.js
+      - name: Commit changes
+        run: |
+          if git diff --quiet -- upstream/index.js; then
+            echo "No changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add upstream/index.js
+          git commit -m "chore: sync gh-proxy index.js"
+          git push
