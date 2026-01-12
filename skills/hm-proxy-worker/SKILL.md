@@ -1,6 +1,6 @@
 ---
 name: hm-proxy-worker
-description: Maintain and deploy the hm-proxy Cloudflare Worker repo. Use for syncing upstream gh-proxy sources into `upstream/index.js`, updating the optimized Worker implementation in `src/index.js`, adjusting proxy settings (PREFIX, WHITE_LIST, USE_JSDELIVR), editing the sync GitHub Action, or deploying with Wrangler/custom domains.
+description: Maintain and deploy the hm-proxy Cloudflare Worker that accelerates GitHub resources via a custom domain. Use when syncing upstream gh-proxy into `upstream/index.js`, refining the optimized Worker in `src/index.js`, ensuring no static site fallback and jsDelivr remains disabled unless explicitly requested, adjusting proxy settings (PREFIX, WHITE_LIST), or managing deploy automation and custom domains.
 ---
 
 # Hm Proxy Worker
@@ -22,6 +22,7 @@ Compare `src/index.js` against upstream and bring over functional changes as nee
 - Keep `USE_JSDELIVR` disabled unless explicitly requested.
 - Keep `PREFIX` starting with `/` and let `PREFIX_PATH` normalize the trailing slash.
 - Maintain CORS headers and redirect handling.
+ - Prefer URL-based parsing over regex-only rewriting when adjusting redirect behavior.
 
 ### 3. Adjust proxy settings
 
@@ -33,3 +34,7 @@ Edit `src/index.js` configuration constants for the desired behavior:
 ### 4. Deploy
 
 Update `wrangler.toml` (name, account ID, compatibility date) and run `wrangler deploy`. Bind custom domains in the Cloudflare dashboard or via routes if needed.
+
+### 5. Deploy automation
+
+Use a GitHub Actions workflow that deploys on push to `main`. Keep secrets named `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, and ensure the workflow uses `cloudflare/wrangler-action`.
