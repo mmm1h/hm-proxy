@@ -14,3 +14,4 @@ Cloudflare Workers proxy based on gh-proxy, with the static site removed.
 ## Usage
 - `https://<worker-domain>/https://github.com/user/repo/blob/branch/file`
 - `https://<worker-domain>/?q=https://github.com/user/repo/blob/branch/file`
+
