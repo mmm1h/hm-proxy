@@ -3,5 +3,6 @@ main = "src/index.js"
 compatibility_date = "2024-05-01"
 workers_dev = true
 [observability]
-enabled = false
-# account_id = "YOUR_ACCOUNT_ID"
+[observability.logs]
+enabled = true
+invocation_logs = true
