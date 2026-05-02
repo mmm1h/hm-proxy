@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   sync:
@@ -18,7 +19,9 @@ jobs:
         run: |
           mkdir -p upstream
           curl -fsSL https://raw.githubusercontent.com/hunshcn/gh-proxy/master/index.js -o upstream/index.js
-      - name: Commit changes
+      - name: Create PR if changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if git diff --quiet -- upstream/index.js; then
             echo "No changes."
@@ -26,6 +29,13 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="sync-upstream/$(date +%Y%m%d)"
+          git checkout -b "$BRANCH"
           git add upstream/index.js
           git commit -m "chore: sync gh-proxy index.js"
-          git push
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "chore: sync upstream gh-proxy $(date +%Y-%m-%d)" \
+            --body "Automated sync of upstream \`index.js\` from hunshcn/gh-proxy. Review the diff before merging." \
+            --base main \
+            --head "$BRANCH"

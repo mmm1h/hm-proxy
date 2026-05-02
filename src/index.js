@@ -1,9 +1,5 @@
 'use strict'
 
-/**
- * static files (404.html, sw.js, conf.js)
- */
-const ASSET_URL = 'https://hunshcn.github.io/gh-proxy/'
 // Prefix; for custom routing like example.com/gh/*, set to '/gh/' (ending slash required).
 const PREFIX = '/'
 // Use jsDelivr mirror for branch files; 0 disables.
@@ -11,6 +7,7 @@ const Config = {
   jsdelivr: 0,
 }
 
+const MAX_REDIRECTS = 5
 const whiteList = [] // allow all when empty
 
 /** @type {ResponseInit} */
@@ -18,17 +15,17 @@ const PREFLIGHT_INIT = {
   status: 204,
   headers: new Headers({
     'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET,POST,PUT,PATCH,TRACE,DELETE,HEAD,OPTIONS',
+    'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS',
     'access-control-max-age': '1728000',
   }),
 }
 
-const exp1 = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:releases|archive)\/.*$/i
-const exp2 = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:blob|raw)\/.*$/i
-const exp3 = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:info|git-).*$/i
-const exp4 = /^(?:https?:\/\/)?raw\.(?:githubusercontent|github)\.com\/.+?\/.+?\/.+?\/.+$/i
-const exp5 = /^(?:https?:\/\/)?gist\.(?:githubusercontent|github)\.com\/.+?\/.+?\/.+$/i
-const exp6 = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/tags.*$/i
+const RE_RELEASE_ARCHIVE = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:releases|archive)\/.*$/i
+const RE_BLOB_RAW = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:blob|raw)\/.*$/i
+const RE_GIT_INFO = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:info|git-).*$/i
+const RE_RAW_HOST = /^(?:https?:\/\/)?raw\.(?:githubusercontent|github)\.com\/.+?\/.+?\/.+?\/.+$/i
+const RE_GIST = /^(?:https?:\/\/)?gist\.(?:githubusercontent|github)\.com\/.+?\/.+?\/.+$/i
+const RE_TAGS = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/tags.*$/i
 
 /**
  * @param {any} body
@@ -51,13 +48,19 @@ function newUrl(urlStr) {
   }
 }
 
-addEventListener('fetch', (e) => {
-  const ret = fetchHandler(e).catch((err) => makeRes('cfworker error:\n' + err.stack, 502))
-  e.respondWith(ret)
-})
+export default {
+  async fetch(request) {
+    try {
+      return await fetchHandler(request)
+    } catch (err) {
+      console.error('cfworker error:', err)
+      return makeRes('Internal Server Error', 502)
+    }
+  },
+}
 
 function checkUrl(u) {
-  for (let i of [exp1, exp2, exp3, exp4, exp5, exp6]) {
+  for (let i of [RE_RELEASE_ARCHIVE, RE_BLOB_RAW, RE_GIT_INFO, RE_RAW_HOST, RE_GIST, RE_TAGS]) {
     if (u.search(i) === 0) {
       return true
     }
@@ -66,10 +69,9 @@ function checkUrl(u) {
 }
 
 /**
- * @param {FetchEvent} e
+ * @param {Request} req
  */
-async function fetchHandler(e) {
-  const req = e.request
+async function fetchHandler(req) {
   const urlStr = req.url
   const urlObj = new URL(urlStr)
   let path = urlObj.searchParams.get('q')
@@ -81,25 +83,25 @@ async function fetchHandler(e) {
   if (!path) {
     return makeRes('Forbidden', 403)
   }
-  if (path.search(exp1) === 0 || path.search(exp5) === 0 || path.search(exp6) === 0 || path.search(exp3) === 0) {
+  if (path.search(RE_RELEASE_ARCHIVE) === 0 || path.search(RE_GIST) === 0 || path.search(RE_TAGS) === 0 || path.search(RE_GIT_INFO) === 0) {
     return httpHandler(req, path)
-  } else if (path.search(exp2) === 0) {
+  } else if (path.search(RE_BLOB_RAW) === 0) {
     if (Config.jsdelivr) {
-      const newUrl = path.replace('/blob/', '@').replace(/^(?:https?:\/\/)?github\.com/, 'https://cdn.jsdelivr.net/gh')
-      return Response.redirect(newUrl, 302)
+      const jsdelivrUrl = path.replace('/blob/', '@').replace(/^(?:https?:\/\/)?github\.com/, 'https://cdn.jsdelivr.net/gh')
+      return Response.redirect(jsdelivrUrl, 302)
     } else {
       path = path.replace('/blob/', '/raw/')
       return httpHandler(req, path)
     }
-  } else if (path.search(exp4) === 0) {
+  } else if (path.search(RE_RAW_HOST) === 0) {
     if (Config.jsdelivr) {
-      const newUrl = path.replace(/(?<=com\/.+?\/.+?)\/(.+?\/)/, '@$1').replace(/^(?:https?:\/\/)?raw\.(?:githubusercontent|github)\.com/, 'https://cdn.jsdelivr.net/gh')
-      return Response.redirect(newUrl, 302)
+      const jsdelivrUrl = path.replace(/(?<=com\/.+?\/.+?)\/(.+?\/)/, '@$1').replace(/^(?:https?:\/\/)?raw\.(?:githubusercontent|github)\.com/, 'https://cdn.jsdelivr.net/gh')
+      return Response.redirect(jsdelivrUrl, 302)
     } else {
       return httpHandler(req, path)
     }
   } else {
-    return fetch(ASSET_URL + path)
+    return makeRes('Not Found', 404)
   }
 }
 
@@ -132,6 +134,9 @@ function httpHandler(req, pathname) {
     urlStr = 'https://' + urlStr
   }
   const urlObj = newUrl(urlStr)
+  if (!urlObj) {
+    return makeRes('Bad Request', 400)
+  }
 
   /** @type {RequestInit} */
   const reqInit = {
@@ -147,7 +152,7 @@ function httpHandler(req, pathname) {
  * @param {URL} urlObj
  * @param {RequestInit} reqInit
  */
-async function proxy(urlObj, reqInit) {
+async function proxy(urlObj, reqInit, redirectCount = 0) {
   const res = await fetch(urlObj.href, reqInit)
   const resHdrOld = res.headers
   const resHdrNew = new Headers(resHdrOld)
@@ -156,10 +161,18 @@ async function proxy(urlObj, reqInit) {
 
   if (resHdrNew.has('location')) {
     let _location = resHdrNew.get('location')
-    if (checkUrl(_location)) resHdrNew.set('location', PREFIX + _location)
-    else {
+    if (checkUrl(_location)) {
+      resHdrNew.set('location', PREFIX + _location)
+    } else {
+      const locationUrl = newUrl(_location)
+      if (!locationUrl) {
+        return makeRes('Bad redirect URL', 502)
+      }
+      if (redirectCount >= MAX_REDIRECTS) {
+        return makeRes('Too many redirects', 508)
+      }
       reqInit.redirect = 'follow'
-      return proxy(newUrl(_location), reqInit)
+      return proxy(locationUrl, reqInit, redirectCount + 1)
     }
   }
   resHdrNew.set('access-control-expose-headers', '*')
